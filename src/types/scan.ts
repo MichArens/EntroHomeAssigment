@@ -7,7 +7,7 @@ export interface ScanRequest {
 
 export interface ScanStatus {
   status: 'in-progress' | 'completed' | 'failed';
-  progress: string;
+  progress: { current: number; total: number };
   findings: Finding[];
   startTime?: string;
   elapsedTime?: string;

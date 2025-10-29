@@ -140,9 +140,10 @@ app.get('/api/scan/:scanid/status', async (req: Request, res: Response) => {
     if (!status) {
       const fileData = await loadResultsFromFile(scanId);
       if (fileData) {
+        const totalCommits = fileData.totalCommits || 0;
         const response: ScanStatus = {
           status: 'completed',
-          progress: 'Scan completed',
+          progress: { current: totalCommits, total: totalCommits },
           findings: fileData.findings || [],
           startTime: fileData.startTime,
           elapsedTime: fileData.duration
@@ -155,7 +156,7 @@ app.get('/api/scan/:scanid/status', async (req: Request, res: Response) => {
       return;
     }
     
-    const progress = await getProgress(scanId) || 'Starting scan...';
+    const progress = await getProgress(scanId) || { current: 0, total: 0 };
     const findings = await getFindings(scanId);
     const startTime = await getStartTime(scanId);
     

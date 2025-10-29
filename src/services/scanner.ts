@@ -38,26 +38,26 @@ export class GitHubScanner {
       const startFrom = checkpoint ? checkpoint.lastCommitSha : null;
       const totalProcessedSoFar = checkpoint ? checkpoint.totalCommits : 0;
       
-      await this.scanCommits(startFrom, totalProcessedSoFar);
+      const totalCommits = await this.scanCommits(startFrom, totalProcessedSoFar);
       
       const endTime = new Date().toISOString();
       await setEndTime(this.scanId, endTime);
       
-      await this.saveResultsToFile();
+      await this.saveResultsToFile(totalCommits);
       
       await setStatus(this.scanId, 'completed');
-      await setProgress(this.scanId, 'Scan completed');
+      await setProgress(this.scanId, { current: totalCommits, total: totalCommits });
       
       // Clean up Redis data after successful completion
       await deleteScan(this.scanId);
     } catch (error) {
       await setStatus(this.scanId, 'failed');
-      await setProgress(this.scanId, `Scan failed: ${error instanceof Error ? error.message : 'Unknown error'}`);
+      // Keep the last known progress for failed scans
       throw error;
     }
   }
 
-  private async saveResultsToFile(): Promise<void> {
+  private async saveResultsToFile(totalCommits: number): Promise<void> {
     try {
       const resultsDirectory = join(process.cwd(), 'results');
       
@@ -78,6 +78,7 @@ export class GitHubScanner {
         scanId: this.scanId,
         repository: `${this.owner}/${this.repo}`,
         totalFindings: findings.length,
+        totalCommits: totalCommits,
         scanDate: new Date().toISOString(),
         startTime: startTime || undefined,
         endTime: endTime || undefined,
@@ -111,7 +112,7 @@ export class GitHubScanner {
     }
   }
 
-  private async scanCommits(startFrom: string | null, totalProcessedSoFar: number): Promise<void> {
+  private async scanCommits(startFrom: string | null, totalProcessedSoFar: number): Promise<number> {
     let totalProcessed = totalProcessedSoFar;
     
     console.log(`[${this.scanId}] Fetching commit history...`);
@@ -187,10 +188,11 @@ export class GitHubScanner {
         totalCommits: totalProcessed
       });
 
-      await setProgress(this.scanId, `Processed ${totalProcessed} commits (${i + 1}/${allCommits.length})`);
+      await setProgress(this.scanId, { current: i + 1, total: allCommits.length });
     }
     
     console.log(`[${this.scanId}] Finished processing all commits`);
+    return allCommits.length;
   }
 
   private async processCommit(commitSha: string): Promise<void> {

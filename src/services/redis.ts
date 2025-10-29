@@ -61,16 +61,20 @@ export async function getStatus(scanId: string): Promise<string | null> {
   return await client.get(key);
 }
 
-export async function setProgress(scanId: string, progress: string): Promise<void> {
+export async function setProgress(scanId: string, progress: { current: number; total: number }): Promise<void> {
   const client = await getRedisClient();
   const key = `scan:${scanId}:progress`;
-  await client.set(key, progress);
+  await client.set(key, JSON.stringify(progress));
 }
 
-export async function getProgress(scanId: string): Promise<string | null> {
+export async function getProgress(scanId: string): Promise<{ current: number; total: number } | null> {
   const client = await getRedisClient();
   const key = `scan:${scanId}:progress`;
-  return await client.get(key);
+  const data = await client.get(key);
+  
+  if (!data) return null;
+  
+  return JSON.parse(data);
 }
 
 export async function setStartTime(scanId: string, startTime: string): Promise<void> {
