@@ -150,6 +150,18 @@ export port=3000
 npm run dev
 ```
 
+## TODO / Future Enhancements
+
+1. **AI-Powered Finding Analysis**
+   - Add an AI agent to review findings and improve pattern detection
+   - Reduce false positives through intelligent analysis
+   - Continuously refine detection patterns based on results
+
+2. **Scan Control**
+   - Add an option to pause/stop ongoing scans
+   - Allow graceful cancellation with checkpoint preservation
+   - Implement scan management endpoints (pause, resume, cancel)
+
 ## License
 
 MIT
