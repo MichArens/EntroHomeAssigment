@@ -2,6 +2,7 @@ import express, { Request, Response } from 'express';
 import * as dotenv from 'dotenv';
 import { promises as fs } from 'fs';
 import { join } from 'path';
+import swaggerUi from 'swagger-ui-express';
 import { GitHubScanner } from './services/scanner';
 import { 
   initRedis, 
@@ -21,11 +22,17 @@ import { ScanRequest, ScanStatus, ScanResults } from './types';
 import { formatDuration, calculateElapsedTime } from './utils/time';
 import { validateRepository, generateScanId } from './utils/validation';
 import { loadResultsFromFile, buildStatusFromFile, buildResultsFromFile } from './utils/responses';
+import { swaggerSpec } from './swagger';
 
 dotenv.config();
 
 const app = express();
 app.use(express.json());
+
+app.use('/api-docs', swaggerUi.serve, swaggerUi.setup(swaggerSpec, {
+  customSiteTitle: 'AWS Secrets Scanner API',
+  customCss: '.swagger-ui .topbar { display: none }'
+}));
 
 const githubToken = process.env.githubtoken || process.env.GITHUB_TOKEN || '';
 const redisUrl = process.env.redisurl || process.env.REDIS_URL || 'redis://localhost:6379';

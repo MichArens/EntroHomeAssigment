@@ -73,7 +73,22 @@ curl -X POST http://localhost:3000/api/scan \
 
 This test repository ([MichArens/EntroHomeAssigment-Test](https://github.com/MichArens/EntroHomeAssigment-Test)) contains 9 commits with various AWS credential types across multiple files, perfect for validating the scanner's detection capabilities.
 
-For detailed API documentation and examples, see **[API_EXAMPLES.md](src/API_EXAMPLES.md)**
+## API Documentation
+
+### Interactive API Documentation
+Once the server is running, access the interactive Swagger UI documentation at:
+```
+http://localhost:3000/api-docs
+```
+
+The Swagger UI provides:
+- Interactive API explorer with "Try it out" functionality
+- Complete request/response schemas
+- Example payloads for all endpoints
+- Real-time API testing
+
+### Command-Line Examples
+For detailed curl and PowerShell examples, see **[API_EXAMPLES.md](src/API_EXAMPLES.md)**
 
 ## How Scanning Works
 
