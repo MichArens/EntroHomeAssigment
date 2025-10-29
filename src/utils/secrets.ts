@@ -4,7 +4,6 @@ export interface SecretPattern {
 }
 
 const secretPatterns: SecretPattern[] = [
-  // AWS Patterns Only
   {
     name: 'AWS_ACCESS_KEY_ID',
     pattern: /(A3T[A-Z0-9]|AKIA|AGPA|AIDA|AROA|AIPA|ANPA|ANVA|ASIA)[A-Z0-9]{16}/g
@@ -59,69 +58,69 @@ export function detectSecrets(content: string): SecretMatch[] {
 }
 
 function shouldIncludeMatch(type: string, value: string): boolean {
-  // Common false positive filters for all AWS secrets
-  const valueLower = value.toLowerCase();
-  
-  // Filter out common test/example values
-  const commonFalsePositives = [
-    'example', 'sample', 'fake', 'test', 'demo', 'placeholder',
-    'your_', 'your-', 'my_', 'my-', 'dummy', 'xxxxxxxx'
-  ];
-  
-  for (const falsePositive of commonFalsePositives) {
-    if (valueLower.includes(falsePositive)) {
-      return false;
-    }
+  if (isCommonFalsePositive(value)) {
+    return false;
   }
   
-  // AWS Secret Access Key Pattern - special filtering for 40-char generic pattern
   if (type === 'AWS_SECRET_ACCESS_KEY_PATTERN') {
-    if (value.length !== 40) return false;
-    if (!/[A-Z]/.test(value)) return false;
-    if (!/[a-z]/.test(value)) return false;
-    if (!/[0-9]/.test(value)) return false;
-    
-    // Filter out URL/path patterns (common false positives)
-    if (valueLower.includes('github') || valueLower.includes('http') || valueLower.includes('www')) {
-      return false;
-    }
-    
-    // Filter out file paths with common directory/file names
-    const commonPathWords = ['src', 'dist', 'main', 'master', 'blob', 'tree', 'commit', 'docs', 'readme', 'contributing', 'license', 'config', 'package'];
-    for (const word of commonPathWords) {
-      if (valueLower.includes(word)) {
-        return false;
-      }
-    }
-    
-    // Check for high entropy - real secrets should be more random
-    if (hasLowEntropy(value)) {
-      return false;
-    }
+    return isValidAwsSecretPattern(value);
   }
   
   return true;
 }
 
-// Calculate Shannon entropy to detect random-looking strings
+function isCommonFalsePositive(value: string): boolean {
+  const valueLower = value.toLowerCase();
+  
+  const commonFalsePositives = [
+    'example', 'sample', 'fake', 'test', 'demo', 'placeholder',
+    'your_', 'your-', 'my_', 'my-', 'dummy', 'xxxxxxxx'
+  ];
+  
+  return commonFalsePositives.some(falsePositive => valueLower.includes(falsePositive));
+}
+
+function isValidAwsSecretPattern(value: string): boolean {
+  if (value.length !== 40) return false;
+  if (!hasRequiredCharacterTypes(value)) return false;
+  if (containsUrlOrPathPatterns(value)) return false;
+  if (hasLowEntropy(value)) return false;
+  
+  return true;
+}
+
+function hasRequiredCharacterTypes(value: string): boolean {
+  return /[A-Z]/.test(value) && /[a-z]/.test(value) && /[0-9]/.test(value);
+}
+
+function containsUrlOrPathPatterns(value: string): boolean {
+  const valueLower = value.toLowerCase();
+  
+  if (valueLower.includes('github') || valueLower.includes('http') || valueLower.includes('www')) {
+    return true;
+  }
+  
+  const commonPathWords = [
+    'src', 'dist', 'main', 'master', 'blob', 'tree', 'commit', 
+    'docs', 'readme', 'contributing', 'license', 'config', 'package'
+  ];
+  
+  return commonPathWords.some(word => valueLower.includes(word));
+}
+
 function hasLowEntropy(str: string): boolean {
   const len = str.length;
   const frequencies: { [key: string]: number } = {};
   
-  // Count character frequencies
   for (const char of str) {
     frequencies[char] = (frequencies[char] || 0) + 1;
   }
   
-  // Calculate entropy
   let entropy = 0;
   for (const char in frequencies) {
     const p = frequencies[char] / len;
     entropy -= p * Math.log2(p);
   }
   
-  // AWS secrets typically have entropy > 4.0
-  // Readable paths like "com/DS4SD/docling/blob/main/CONTRIBUTING" have lower entropy
   return entropy < 3.5;
 }
-

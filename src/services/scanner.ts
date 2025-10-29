@@ -3,7 +3,21 @@ import { promises as fs } from 'fs';
 import { join } from 'path';
 import { Finding } from '../types';
 import { detectSecrets } from '../utils/secrets';
-import { saveCheckpoint, getCheckpoint, saveFinding, setStatus, setProgress, setStartTime, setEndTime, setResultsFile, getFindings, getStartTime, getEndTime, deleteScan } from './redis';
+import { formatDuration } from '../utils/time';
+import { 
+  saveCheckpoint, 
+  getCheckpoint, 
+  saveFinding, 
+  setStatus, 
+  setProgress, 
+  setStartTime, 
+  setEndTime, 
+  setResultsFile, 
+  getFindings, 
+  getStartTime, 
+  getEndTime, 
+  deleteScan 
+} from './redis';
 
 export class GitHubScanner {
   private octokit: Octokit;
@@ -23,11 +37,9 @@ export class GitHubScanner {
     try {
       await setStatus(this.scanId, 'in-progress');
       
-      // Check if this is a resumed scan or a new scan
       const checkpoint = await getCheckpoint(this.scanId);
       const existingStartTime = await getStartTime(this.scanId);
       
-      // Only set start time if this is a new scan (no existing start time)
       if (!existingStartTime) {
         await setStartTime(this.scanId, new Date().toISOString());
         console.log(`[${this.scanId}] Starting new scan`);
@@ -48,11 +60,9 @@ export class GitHubScanner {
       await setStatus(this.scanId, 'completed');
       await setProgress(this.scanId, { current: totalCommits, total: totalCommits });
       
-      // Clean up Redis data after successful completion
       await deleteScan(this.scanId);
     } catch (error) {
       await setStatus(this.scanId, 'failed');
-      // Keep the last known progress for failed scans
       throw error;
     }
   }
@@ -82,33 +92,14 @@ export class GitHubScanner {
         scanDate: new Date().toISOString(),
         startTime: startTime || undefined,
         endTime: endTime || undefined,
-        duration: startTime && endTime ? this.formatDuration(startTime, endTime) : undefined,
+        duration: startTime && endTime ? formatDuration(startTime, endTime) : undefined,
         findings: findings
       };
       
       await fs.writeFile(filePath, JSON.stringify(resultsData, null, 2), 'utf-8');
-      
       await setResultsFile(this.scanId, filePath);
     } catch (error) {
-      // Do not throw, just continue
-    }
-  }
-  
-  private formatDuration(startTime: string, endTime: string): string {
-    const start = new Date(startTime).getTime();
-    const end = new Date(endTime).getTime();
-    const diffMs = end - start;
-    
-    const seconds = Math.floor(diffMs / 1000);
-    const minutes = Math.floor(seconds / 60);
-    const hours = Math.floor(minutes / 60);
-    
-    if (hours > 0) {
-      return `${hours}h ${minutes % 60}m ${seconds % 60}s`;
-    } else if (minutes > 0) {
-      return `${minutes}m ${seconds % 60}s`;
-    } else {
-      return `${seconds}s`;
+      // Do not throw, continue without file
     }
   }
 
@@ -117,65 +108,13 @@ export class GitHubScanner {
     
     console.log(`[${this.scanId}] Fetching commit history...`);
     
-    // Fetch all commits (GitHub returns newest to oldest)
-    const allCommits: string[] = [];
-    let page = 1;
-    
-    while (true) {
-      try {
-        const response = await this.octokit.repos.listCommits({
-          owner: this.owner,
-          repo: this.repo,
-          per_page: 100,
-          page: page
-        });
-
-        await this.handleRateLimit(response);
-
-        if (response.data.length === 0) {
-          break;
-        }
-
-        // Collect commit SHAs
-        for (const commit of response.data) {
-          allCommits.push(commit.sha);
-        }
-
-        if (response.data.length < 100) {
-          break;
-        }
-
-        page++;
-      } catch (error) {
-        if (this.isRateLimitError(error)) {
-          await this.waitForRateLimit();
-          continue;
-        }
-        throw error;
-      }
-    }
-    
-    // Reverse to get oldest to newest
+    const allCommits = await this.fetchAllCommits();
     allCommits.reverse();
     
     console.log(`[${this.scanId}] Found ${allCommits.length} total commits`);
     
-    // Find starting point if resuming
-    let startIndex = 0;
-    if (startFrom) {
-      const checkpointIndex = allCommits.indexOf(startFrom);
-      if (checkpointIndex !== -1) {
-        // Start from the commit AFTER the checkpoint
-        startIndex = checkpointIndex + 1;
-        console.log(`[${this.scanId}] Resuming from commit ${startIndex + 1}/${allCommits.length}`);
-      } else {
-        console.log(`[${this.scanId}] Checkpoint commit not found, starting from beginning`);
-      }
-    } else {
-      console.log(`[${this.scanId}] Starting from oldest commit`);
-    }
+    const startIndex = this.findStartIndex(allCommits, startFrom);
     
-    // Process commits from oldest to newest
     for (let i = startIndex; i < allCommits.length; i++) {
       const commitSha = allCommits[i];
       
@@ -195,6 +134,62 @@ export class GitHubScanner {
     return allCommits.length;
   }
 
+  private async fetchAllCommits(): Promise<string[]> {
+    const allCommits: string[] = [];
+    let page = 1;
+    
+    while (true) {
+      try {
+        const response = await this.octokit.repos.listCommits({
+          owner: this.owner,
+          repo: this.repo,
+          per_page: 100,
+          page: page
+        });
+
+        await this.handleRateLimit(response);
+
+        if (response.data.length === 0) {
+          break;
+        }
+
+        for (const commit of response.data) {
+          allCommits.push(commit.sha);
+        }
+
+        if (response.data.length < 100) {
+          break;
+        }
+
+        page++;
+      } catch (error) {
+        if (this.isRateLimitError(error)) {
+          await this.waitForRateLimit();
+          continue;
+        }
+        throw error;
+      }
+    }
+    
+    return allCommits;
+  }
+
+  private findStartIndex(allCommits: string[], startFrom: string | null): number {
+    if (!startFrom) {
+      console.log(`[${this.scanId}] Starting from oldest commit`);
+      return 0;
+    }
+    
+    const checkpointIndex = allCommits.indexOf(startFrom);
+    if (checkpointIndex !== -1) {
+      console.log(`[${this.scanId}] Resuming from commit ${checkpointIndex + 2}/${allCommits.length}`);
+      return checkpointIndex + 1;
+    }
+    
+    console.log(`[${this.scanId}] Checkpoint commit not found, starting from beginning`);
+    return 0;
+  }
+
   private async processCommit(commitSha: string): Promise<void> {
     try {
       console.log(`[${this.scanId}] Processing commit: ${commitSha}`);
@@ -208,9 +203,7 @@ export class GitHubScanner {
       await this.handleRateLimit(commitDetails);
 
       const commit = commitDetails.data;
-      const committer = commit.commit.committer?.name || commit.commit.author?.name || 'Unknown';
-      const committerEmail = commit.commit.committer?.email || commit.commit.author?.email || '';
-      const committerInfo = committerEmail ? `${committer} <${committerEmail}>` : committer;
+      const committerInfo = this.getCommitterInfo(commit);
       const timestamp = commit.commit.committer?.date || commit.commit.author?.date || new Date().toISOString();
 
       if (commit.files) {
@@ -228,6 +221,12 @@ export class GitHubScanner {
     }
   }
 
+  private getCommitterInfo(commit: any): string {
+    const committer = commit.commit.committer?.name || commit.commit.author?.name || 'Unknown';
+    const committerEmail = commit.commit.committer?.email || commit.commit.author?.email || '';
+    return committerEmail ? `${committer} <${committerEmail}>` : committer;
+  }
+
   private async scanDiff(
     patch: string,
     commitSha: string,
@@ -239,45 +238,64 @@ export class GitHubScanner {
     let currentLineNumber = 0;
     
     for (const line of lines) {
-      // Parse hunk headers to get starting line number
-      // Format: @@ -oldStart,oldLines +newStart,newLines @@
-      if (line.startsWith('@@')) {
-        const match = line.match(/@@\s+-\d+(?:,\d+)?\s+\+(\d+)(?:,\d+)?\s+@@/);
-        if (match) {
-          currentLineNumber = parseInt(match[1], 10);
-        }
+      const hunkLineNumber = this.parseDiffHunkHeader(line);
+      if (hunkLineNumber !== null) {
+        currentLineNumber = hunkLineNumber;
         continue;
       }
       
-      // Process added lines
-      if (line.startsWith('+') && !line.startsWith('+++')) {
+      if (this.isAddedLine(line)) {
         const content = line.substring(1);
-        const secrets = detectSecrets(content);
-        
-        for (const secret of secrets) {
-          console.log(`[${this.scanId}] 🔍 Found ${secret.type} in ${filename}:${currentLineNumber} (commit: ${commitSha.substring(0, 7)})`);
-          
-          const commitUrl = `https://github.com/${this.owner}/${this.repo}/commit/${commitSha}`;
-          
-          const finding: Finding = {
-            commit: commitSha,
-            commitUrl: commitUrl,
-            committer: committer,
-            timestamp: timestamp,
-            file: filename,
-            line: currentLineNumber,
-            leakValue: secret.value,
-            leakType: secret.type
-          };
-          
-          await saveFinding(this.scanId, finding);
-        }
-        
+        await this.scanLineForSecrets(content, commitSha, committer, timestamp, filename, currentLineNumber);
         currentLineNumber++;
-      } else if (!line.startsWith('-')) {
-        // Context lines (not removed, not added) also increment line number
+      } else if (!this.isRemovedLine(line)) {
         currentLineNumber++;
       }
+    }
+  }
+
+  private parseDiffHunkHeader(line: string): number | null {
+    if (!line.startsWith('@@')) {
+      return null;
+    }
+    
+    const match = line.match(/@@\s+-\d+(?:,\d+)?\s+\+(\d+)(?:,\d+)?\s+@@/);
+    return match ? parseInt(match[1], 10) : null;
+  }
+
+  private isAddedLine(line: string): boolean {
+    return line.startsWith('+') && !line.startsWith('+++');
+  }
+
+  private isRemovedLine(line: string): boolean {
+    return line.startsWith('-');
+  }
+
+  private async scanLineForSecrets(
+    content: string,
+    commitSha: string,
+    committer: string,
+    timestamp: string,
+    filename: string,
+    lineNumber: number
+  ): Promise<void> {
+    const secrets = detectSecrets(content);
+    
+    for (const secret of secrets) {
+      console.log(`[${this.scanId}] 🔍 Found ${secret.type} in ${filename}:${lineNumber} (commit: ${commitSha.substring(0, 7)})`);
+      
+      const finding: Finding = {
+        commit: commitSha,
+        commitUrl: `https://github.com/${this.owner}/${this.repo}/commit/${commitSha}`,
+        committer: committer,
+        timestamp: timestamp,
+        file: filename,
+        line: lineNumber,
+        leakValue: secret.value,
+        leakType: secret.type
+      };
+      
+      await saveFinding(this.scanId, finding);
     }
   }
 
@@ -308,4 +326,3 @@ export class GitHubScanner {
     return new Promise(resolve => setTimeout(resolve, ms));
   }
 }
-
