@@ -62,6 +62,17 @@ curl -X POST http://localhost:3000/api/scan \
   -d '{"repository": "octocat/Hello-World"}'
 ```
 
+**Test Repository with Intentional Secrets:**
+
+To test the scanner with a repository containing intentional AWS secrets, use:
+```bash
+curl -X POST http://localhost:3000/api/scan \
+  -H "Content-Type: application/json" \
+  -d '{"repository": "MichArens/EntroHomeAssigment-Test"}'
+```
+
+This test repository ([MichArens/EntroHomeAssigment-Test](https://github.com/MichArens/EntroHomeAssigment-Test)) contains 9 commits with various AWS credential types across multiple files, perfect for validating the scanner's detection capabilities.
+
 For detailed API documentation and examples, see **[API_EXAMPLES.md](src/API_EXAMPLES.md)**
 
 ## How Scanning Works
