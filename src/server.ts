@@ -248,6 +248,41 @@ app.delete('/api/scan/:scanid', async (req: Request, res: Response) => {
   }
 });
 
+app.get('/api/results', async (req: Request, res: Response) => {
+  try {
+    // Get scan IDs from Redis
+    const redisscanids = await getallscanids();
+    
+    // Get scan IDs from results directory
+    const resultsdirectory = join(process.cwd(), 'results');
+    let filescanids: string[] = [];
+    
+    try {
+      const files = await fs.readdir(resultsdirectory);
+      filescanids = files
+        .filter(file => file.startsWith('scan_') && file.endsWith('_results.json'))
+        .map(file => {
+          // Extract scan ID from filename: scan_{scanid}_results.json
+          const match = file.match(/^scan_(.+)_results\.json$/);
+          return match ? match[1] : null;
+        })
+        .filter((id): id is string => id !== null);
+    } catch (error) {
+      // Directory doesn't exist or can't be read, just use Redis IDs
+    }
+    
+    // Combine and deduplicate
+    const allscanids = [...new Set([...redisscanids, ...filescanids])];
+    
+    res.json({ scanids: allscanids });
+  } catch (error) {
+    res.status(500).json({ 
+      error: 'Internal server error',
+      message: error instanceof Error ? error.message : 'Unknown error'
+    });
+  }
+});
+
 app.get('/health', (req: Request, res: Response) => {
   res.json({ status: 'ok' });
 });

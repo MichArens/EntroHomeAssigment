@@ -4,9 +4,10 @@ export interface SecretPattern {
 }
 
 const secretpatterns: SecretPattern[] = [
+  // AWS Patterns Only
   {
     name: 'AWS_ACCESS_KEY_ID',
-    pattern: /AKIA[0-9A-Z]{16}/g
+    pattern: /(A3T[A-Z0-9]|AKIA|AGPA|AIDA|AROA|AIPA|ANPA|ANVA|ASIA)[A-Z0-9]{16}/g
   },
   {
     name: 'AWS_SECRET_ACCESS_KEY',
@@ -22,7 +23,7 @@ const secretpatterns: SecretPattern[] = [
   },
   {
     name: 'AWS_ACCOUNT_ID',
-    pattern: /aws_account_id[\s]*[=:][\s]*['"]?(\d{12})['"]?/gi
+    pattern: /(?:aws_account_id|aws_account)[\s]*[=:][\s]*['"]?(\d{12})['"]?/gi
   },
   {
     name: 'AWS_MWS_KEY',
@@ -58,21 +59,69 @@ export function detectsecrets(content: string): SecretMatch[] {
 }
 
 function shouldincludematch(type: string, value: string): boolean {
+  // Common false positive filters for all AWS secrets
+  const valueLower = value.toLowerCase();
+  
+  // Filter out common test/example values
+  const commonFalsePositives = [
+    'example', 'sample', 'fake', 'test', 'demo', 'placeholder',
+    'your_', 'your-', 'my_', 'my-', 'dummy', 'xxxxxxxx'
+  ];
+  
+  for (const falsePositive of commonFalsePositives) {
+    if (valueLower.includes(falsePositive)) {
+      return false;
+    }
+  }
+  
+  // AWS Secret Access Key Pattern - special filtering for 40-char generic pattern
   if (type === 'AWS_SECRET_ACCESS_KEY_PATTERN') {
     if (value.length !== 40) return false;
     if (!/[A-Z]/.test(value)) return false;
     if (!/[a-z]/.test(value)) return false;
     if (!/[0-9]/.test(value)) return false;
-  }
-  
-  if (value.includes('example') || value.includes('EXAMPLE')) {
-    return false;
-  }
-  
-  if (value.includes('fake') || value.includes('FAKE')) {
-    return false;
+    
+    // Filter out URL/path patterns (common false positives)
+    if (valueLower.includes('github') || valueLower.includes('http') || valueLower.includes('www')) {
+      return false;
+    }
+    
+    // Filter out file paths with common directory/file names
+    const commonpathwords = ['src', 'dist', 'main', 'master', 'blob', 'tree', 'commit', 'docs', 'readme', 'contributing', 'license', 'config', 'package'];
+    for (const word of commonpathwords) {
+      if (valueLower.includes(word)) {
+        return false;
+      }
+    }
+    
+    // Check for high entropy - real secrets should be more random
+    if (hasLowEntropy(value)) {
+      return false;
+    }
   }
   
   return true;
+}
+
+// Calculate Shannon entropy to detect random-looking strings
+function hasLowEntropy(str: string): boolean {
+  const len = str.length;
+  const frequencies: { [key: string]: number } = {};
+  
+  // Count character frequencies
+  for (const char of str) {
+    frequencies[char] = (frequencies[char] || 0) + 1;
+  }
+  
+  // Calculate entropy
+  let entropy = 0;
+  for (const char in frequencies) {
+    const p = frequencies[char] / len;
+    entropy -= p * Math.log2(p);
+  }
+  
+  // AWS secrets typically have entropy > 4.0
+  // Readable paths like "com/DS4SD/docling/blob/main/CONTRIBUTING" have lower entropy
+  return entropy < 3.5;
 }
 

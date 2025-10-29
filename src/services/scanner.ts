@@ -234,14 +234,26 @@ export class GitHubScanner {
     filename: string
   ): Promise<void> {
     const lines = patch.split('\n');
+    let currentlinenumber = 0;
     
     for (const line of lines) {
+      // Parse hunk headers to get starting line number
+      // Format: @@ -oldStart,oldLines +newStart,newLines @@
+      if (line.startsWith('@@')) {
+        const match = line.match(/@@\s+-\d+(?:,\d+)?\s+\+(\d+)(?:,\d+)?\s+@@/);
+        if (match) {
+          currentlinenumber = parseInt(match[1], 10);
+        }
+        continue;
+      }
+      
+      // Process added lines
       if (line.startsWith('+') && !line.startsWith('+++')) {
         const content = line.substring(1);
         const secrets = detectsecrets(content);
         
         for (const secret of secrets) {
-          console.log(`[${this.scanid}] 🔍 Found ${secret.type} in ${filename} (commit: ${commitsha.substring(0, 7)})`);
+          console.log(`[${this.scanid}] 🔍 Found ${secret.type} in ${filename}:${currentlinenumber} (commit: ${commitsha.substring(0, 7)})`);
           
           const commiturl = `https://github.com/${this.owner}/${this.repo}/commit/${commitsha}`;
           
@@ -251,12 +263,18 @@ export class GitHubScanner {
             committer: committer,
             timestamp: timestamp,
             file: filename,
+            line: currentlinenumber,
             leakvalue: secret.value,
             leaktype: secret.type
           };
           
           await savefinding(this.scanid, finding);
         }
+        
+        currentlinenumber++;
+      } else if (!line.startsWith('-')) {
+        // Context lines (not removed, not added) also increment line number
+        currentlinenumber++;
       }
     }
   }

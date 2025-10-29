@@ -4,6 +4,7 @@ export interface Finding {
   committer: string;
   timestamp: string;
   file: string;
+  line: number;
   leakvalue: string;
   leaktype: string;
 }

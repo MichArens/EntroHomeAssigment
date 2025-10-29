@@ -60,6 +60,16 @@ Example:
 curl http://localhost:3000/api/scan/scan_1730217600_abc123/results
 ```
 
+## Get All Results
+
+Get a list of all available scan IDs (both active and completed):
+
+```bash
+curl http://localhost:3000/api/results
+```
+
+This returns all scan IDs from both Redis (active scans) and the results directory (completed scans).
+
 ## Delete Scan Data
 
 ```bash
@@ -122,5 +132,10 @@ Invoke-RestMethod -Uri "http://localhost:3000/api/scan/SCAN_ID/status"
 ### Get results
 ```powershell
 Invoke-RestMethod -Uri "http://localhost:3000/api/scan/SCAN_ID/results"
+```
+
+### Get all results
+```powershell
+Invoke-RestMethod -Uri "http://localhost:3000/api/results"
 ```
 
