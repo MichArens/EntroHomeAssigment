@@ -5,19 +5,17 @@ Write-Host ""
 if (Test-Path .env) {
     Write-Host "[OK] .env file already exists" -ForegroundColor Green
 } else {
-    Write-Host "Creating .env file..." -ForegroundColor Yellow
-    
-    $envContent = @"
-githubtoken=your_github_personal_access_token_here
-redisurl=redis://redis:6379
-port=3000
-"@
-    
-    Set-Content -Path .env -Value $envContent
-    Write-Host "[OK] .env file created successfully" -ForegroundColor Green
-    Write-Host ""
-    Write-Host "[IMPORTANT] Edit .env and add your GitHub Personal Access Token" -ForegroundColor Yellow
-    Write-Host "Get your token at: https://github.com/settings/tokens" -ForegroundColor Yellow
+    if (Test-Path .env-example) {
+        Write-Host "Creating .env file from .env-example..." -ForegroundColor Yellow
+        Copy-Item .env-example .env
+        Write-Host "[OK] .env file created successfully" -ForegroundColor Green
+        Write-Host ""
+        Write-Host "[IMPORTANT] Edit .env and add your GitHub Personal Access Token" -ForegroundColor Yellow
+        Write-Host "Get your token at: https://github.com/settings/tokens" -ForegroundColor Yellow
+    } else {
+        Write-Host "[ERROR] .env-example file not found" -ForegroundColor Red
+        exit 1
+    }
 }
 
 Write-Host ""

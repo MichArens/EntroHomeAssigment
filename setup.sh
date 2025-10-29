@@ -7,16 +7,17 @@ echo ""
 if [ -f .env ]; then
     echo "✓ .env file already exists"
 else
-    echo "Creating .env file..."
-    cat > .env << EOF
-githubtoken=your_github_personal_access_token_here
-redisurl=redis://redis:6379
-port=3000
-EOF
-    echo "✓ .env file created"
-    echo ""
-    echo "⚠️  IMPORTANT: Edit .env and add your GitHub Personal Access Token"
-    echo "   Get your token at: https://github.com/settings/tokens"
+    if [ -f .env-example ]; then
+        echo "Creating .env file from .env-example..."
+        cp .env-example .env
+        echo "✓ .env file created"
+        echo ""
+        echo "⚠️  IMPORTANT: Edit .env and add your GitHub Personal Access Token"
+        echo "   Get your token at: https://github.com/settings/tokens"
+    else
+        echo "❌ ERROR: .env-example file not found"
+        exit 1
+    fi
 fi
 
 echo ""

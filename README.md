@@ -1,39 +1,46 @@
 # AWS Secrets Scanner
 
-A web server application that scans GitHub repositories for leaked AWS secrets via REST API. Detects AWS Access Keys, Secret Keys, Session Tokens, and other credentials in commit diffs.
+A REST API service that scans GitHub repositories for leaked AWS credentials in commit history.
 
-## Features
+## Tech Stack
 
-- REST API for scanning GitHub repositories
-- Detects 6 types of AWS secrets and credentials
-- Checkpoint/resume for interrupted scans
-- Automatic timing tracking and results export to JSON
-- Rate limit handling and pagination
-- Redis-backed storage
-- Fully containerized with Docker
+### Core Technologies
+- **TypeScript/Node.js** - Type-safe runtime environment
+- **Express** - Lightweight web framework for REST API
+- **Octokit** - Official GitHub API SDK for repository access
+- **Redis** - In-memory storage for scan state and checkpoints
+- **Docker** - Containerization for consistent deployment
 
-## Quick Start
+### Why This Stack?
+
+- **TypeScript**: Provides type safety and better developer experience for complex data structures (scans, findings, checkpoints)
+- **Express**: Minimal overhead, perfect for REST APIs, extensive middleware ecosystem
+- **Octokit**: Official GitHub SDK handles authentication, rate limiting, and pagination automatically
+- **Redis**: Fast in-memory storage ideal for scan state, supports resumable scans, and handles concurrent operations
+- **Docker**: Ensures consistent environment across development and production, simplifies Redis setup
+
+## Setup
 
 ### 1. Get GitHub Token
 
-Visit [github.com/settings/tokens](https://github.com/settings/tokens) and create a token with `repo` scope.
+Create a personal access token at [github.com/settings/tokens](https://github.com/settings/tokens) with `repo` scope.
 
-### 2. Setup Environment
+### 2. Configure Environment
 
 **Windows (PowerShell):**
 ```powershell
 .\setup.ps1
-# Edit .env and add your token
+# Edit .env and add your GitHub token
 ```
 
 **Mac/Linux:**
 ```bash
 chmod +x setup.sh && ./setup.sh
-# Edit .env and add your token
+# Edit .env and add your GitHub token
 ```
 
 **Manual:** Create `.env` file:
-```
+```env
 githubtoken=your_token_here
 redisurl=redis://redis:6379
 port=3000
@@ -45,130 +52,64 @@ port=3000
 docker-compose up --build
 ```
 
-### 4. Scan a Repository
+The API will be available at `http://localhost:3000`
+
+### 4. Test It
 
 ```bash
-# Start scan
 curl -X POST http://localhost:3000/api/scan \
   -H "Content-Type: application/json" \
   -d '{"repository": "octocat/Hello-World"}'
-
-# Check status (use scanid from response)
-curl http://localhost:3000/api/scan/SCAN_ID/status
-
-# Get results
-curl http://localhost:3000/api/scan/SCAN_ID/results
 ```
 
-See `src/API_EXAMPLES.md` for more examples.
+For detailed API documentation and examples, see **[API_EXAMPLES.md](src/API_EXAMPLES.md)**
 
-## API Endpoints
+## How Scanning Works
 
-### POST /api/scan
-Start a new scan.
+### Scan Flow (Per Commit)
 
-**Request:**
-```json
-{
-  "repository": "owner/repo",
-  "scanid": "optional-id-for-resuming"
-}
-```
+1. **Fetch Commit Data**
+   - Retrieve commit metadata from GitHub API (SHA, author, timestamp)
+   - Get list of files changed in the commit
 
-**Response:**
-```json
-{
-  "message": "Scan started",
-  "scanid": "scan_1234567890_abc123",
-  "statusurl": "/api/scan/scan_1234567890_abc123/status"
-}
-```
+2. **Get File Diffs**
+   - Fetch diff for each modified file
+   - Parse diff to identify added lines (ignore deletions)
 
-### GET /api/scan/:scanid/status
-Check scan progress with timing.
+3. **Scan Added Lines**
+   - Run each added line through AWS secret detection patterns:
+     - AWS Access Key ID (`AKIA...`)
+     - AWS Secret Access Key (40-character keys)
+     - AWS Session Tokens
+     - AWS Account IDs
+     - AWS MWS Keys
+     - Additional AWS credential patterns
 
-**Response:**
-```json
-{
-  "status": "in-progress",
-  "progress": "Processed 50 commits",
-  "starttime": "2025-01-15T10:00:00Z",
-  "elapsedtime": "2m 15s",
-  "findings": [...]
-}
-```
+4. **Record Findings**
+   - For each detected secret, store:
+     - Secret type and value
+     - File path and line number
+     - Commit SHA, author, and timestamp
+     - Confidence level (entropy-based validation)
 
-### GET /api/scan/:scanid/results
-Get complete results with timing and file path.
+5. **Save Checkpoint**
+   - Store scan progress to Redis after each commit
+   - Enables resume capability if scan is interrupted
+   - Tracks: last processed commit SHA, total commits processed, findings count
 
-**Response:**
-```json
-{
-  "scanid": "scan_1234567890_abc123",
-  "status": "completed",
-  "totalfindings": 5,
-  "starttime": "2025-01-15T10:00:00Z",
-  "endtime": "2025-01-15T10:15:30Z",
-  "duration": "15m 30s",
-  "resultsfile": "/app/results/scan_scan_1234567890_abc123_results.json",
-  "findings": [...]
-}
-```
+6. **Continue to Next Commit**
+   - Process commits in chronological order (newest to oldest)
+   - Handle GitHub rate limits (auto-wait and retry)
+   - Update scan status in Redis
 
-Results are auto-saved to `results/` directory as JSON files.
+7. **Complete Scan**
+   - Export all findings to JSON file in `results/` directory
+   - Calculate total duration and statistics
+   - Mark scan as completed in Redis
 
-### DELETE /api/scan/:scanid
-Clear scan data from Redis.
+### Resumable Scans
 
-## Resume Interrupted Scans
-
-Use the same `scanid` to continue:
-
-```bash
-curl -X POST http://localhost:3000/api/scan \
-  -H "Content-Type: application/json" \
-  -d '{"repository": "owner/repo", "scanid": "previous-scan-id"}'
-```
-
-## Detected Secret Types
-
-- `AWS_ACCESS_KEY_ID` - AKIA... format
-- `AWS_SECRET_ACCESS_KEY` - 40-character keys
-- `AWS_SESSION_TOKEN` - Session tokens
-- `AWS_ACCOUNT_ID` - Account IDs
-- `AWS_MWS_KEY` - Amazon MWS keys
-- Additional AWS credential patterns
-
-## Troubleshooting
-
-**"GitHub token not provided"**
-- Ensure `.env` exists with correct token
-- Restart: `docker-compose down && docker-compose up`
-
-**"Cannot connect to Redis"**
-- Verify Docker is running
-- Check: `docker-compose ps`
-
-**Rate limits**
-- GitHub API: 5000 requests/hour
-- Scanner auto-handles with wait/retry
-
-## Project Structure
-
-```
-src/
-├── server.ts              ← Main Express server
-├── services/
-│   ├── redis.ts          ← Redis client & storage
-│   └── scanner.ts        ← GitHub scanning logic
-├── types/
-│   ├── finding.ts        ← Finding interface
-│   ├── scan.ts           ← Scan interfaces
-│   ├── checkpoint.ts     ← Checkpoint interface
-│   └── index.ts          ← Type exports
-└── utils/
-    └── secrets.ts        ← AWS secret detection
-```
+If a scan is interrupted, restart it with the same `scanid` - it will resume from the last checkpoint.
 
 ## Local Development
 
@@ -182,23 +123,6 @@ export port=3000
 
 npm run dev
 ```
-
-## Technical Details
-
-- Scans commits in descending chronological order
-- Processes all file diffs (added lines only)
-- Stores checkpoint after each commit
-- Automatic rate limit handling
-- Variables use lowercase without delimiters
-- Debug logs show commit processing
-
-## Architecture
-
-- **TypeScript/Node.js** - Runtime
-- **Express** - Web framework
-- **Octokit** - GitHub API SDK
-- **Redis** - State storage
-- **Docker** - Containerization
 
 ## License
 
