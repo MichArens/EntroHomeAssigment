@@ -3,7 +3,7 @@ import { promises as fs } from 'fs';
 import { join } from 'path';
 import { Finding } from '../types';
 import { detectsecrets } from '../utils/secrets';
-import { savecheckpoint, getcheckpoint, savefinding, setstatus, setprogress, setstarttime, setendtime, setresultsfile, getfindings } from './redis';
+import { savecheckpoint, getcheckpoint, savefinding, setstatus, setprogress, setstarttime, setendtime, setresultsfile, getfindings, getstarttime, getendtime, deletescan } from './redis';
 
 export class GitHubScanner {
   private octokit: Octokit;
@@ -20,16 +20,25 @@ export class GitHubScanner {
   }
 
   async scan(): Promise<void> {
-    const starttime = new Date().toISOString();
-    
     try {
       await setstatus(this.scanid, 'in-progress');
-      await setstarttime(this.scanid, starttime);
       
+      // Check if this is a resumed scan or a new scan
       const checkpoint = await getcheckpoint(this.scanid);
-      const startfrom = checkpoint ? checkpoint.lastcommitsha : null;
+      const existingstarttime = await getstarttime(this.scanid);
       
-      await this.scancommits(startfrom);
+      // Only set start time if this is a new scan (no existing start time)
+      if (!existingstarttime) {
+        await setstarttime(this.scanid, new Date().toISOString());
+        console.log(`[${this.scanid}] Starting new scan`);
+      } else {
+        console.log(`[${this.scanid}] Resuming scan from checkpoint`);
+      }
+      
+      const startfrom = checkpoint ? checkpoint.lastcommitsha : null;
+      const totalprocessedsofar = checkpoint ? checkpoint.totalcommits : 0;
+      
+      await this.scancommits(startfrom, totalprocessedsofar);
       
       const endtime = new Date().toISOString();
       await setendtime(this.scanid, endtime);
@@ -38,6 +47,9 @@ export class GitHubScanner {
       
       await setstatus(this.scanid, 'completed');
       await setprogress(this.scanid, 'Scan completed');
+      
+      // Clean up Redis data after successful completion
+      await deletescan(this.scanid);
     } catch (error) {
       await setstatus(this.scanid, 'failed');
       await setprogress(this.scanid, `Scan failed: ${error instanceof Error ? error.message : 'Unknown error'}`);
@@ -59,12 +71,17 @@ export class GitHubScanner {
       const filepath = join(resultsdirectory, filename);
       
       const findings = await getfindings(this.scanid);
+      const starttime = await getstarttime(this.scanid);
+      const endtime = await getendtime(this.scanid);
       
       const resultsdata = {
         scanid: this.scanid,
         repository: `${this.owner}/${this.repo}`,
         totalfindings: findings.length,
         scandate: new Date().toISOString(),
+        starttime: starttime || undefined,
+        endtime: endtime || undefined,
+        duration: starttime && endtime ? this.formatduration(starttime, endtime) : undefined,
         findings: findings
       };
       
@@ -75,12 +92,34 @@ export class GitHubScanner {
       // Do not throw, just continue
     }
   }
+  
+  private formatduration(starttime: string, endtime: string): string {
+    const start = new Date(starttime).getTime();
+    const end = new Date(endtime).getTime();
+    const diffms = end - start;
+    
+    const seconds = Math.floor(diffms / 1000);
+    const minutes = Math.floor(seconds / 60);
+    const hours = Math.floor(minutes / 60);
+    
+    if (hours > 0) {
+      return `${hours}h ${minutes % 60}m ${seconds % 60}s`;
+    } else if (minutes > 0) {
+      return `${minutes}m ${seconds % 60}s`;
+    } else {
+      return `${seconds}s`;
+    }
+  }
 
-  private async scancommits(startfrom: string | null): Promise<void> {
+  private async scancommits(startfrom: string | null, totalprocessedsofar: number): Promise<void> {
+    let totalprocessed = totalprocessedsofar;
+    
+    console.log(`[${this.scanid}] Fetching commit history...`);
+    
+    // Fetch all commits (GitHub returns newest to oldest)
+    const allcommits: string[] = [];
     let page = 1;
-    let foundstartpoint = startfrom === null;
-    let totalprocessed = 0;
-
+    
     while (true) {
       try {
         const response = await this.octokit.repos.listCommits({
@@ -96,24 +135,9 @@ export class GitHubScanner {
           break;
         }
 
+        // Collect commit SHAs
         for (const commit of response.data) {
-          if (!foundstartpoint) {
-            if (commit.sha === startfrom) {
-              foundstartpoint = true;
-            }
-            continue;
-          }
-
-          await this.processcommit(commit.sha);
-          totalprocessed++;
-
-          await savecheckpoint(this.scanid, {
-            lastcommitsha: commit.sha,
-            timestamp: new Date().toISOString(),
-            totalcommits: totalprocessed
-          });
-
-          await setprogress(this.scanid, `Processed ${totalprocessed} commits`);
+          allcommits.push(commit.sha);
         }
 
         if (response.data.length < 100) {
@@ -129,6 +153,44 @@ export class GitHubScanner {
         throw error;
       }
     }
+    
+    // Reverse to get oldest to newest
+    allcommits.reverse();
+    
+    console.log(`[${this.scanid}] Found ${allcommits.length} total commits`);
+    
+    // Find starting point if resuming
+    let startindex = 0;
+    if (startfrom) {
+      const checkpointindex = allcommits.indexOf(startfrom);
+      if (checkpointindex !== -1) {
+        // Start from the commit AFTER the checkpoint
+        startindex = checkpointindex + 1;
+        console.log(`[${this.scanid}] Resuming from commit ${startindex + 1}/${allcommits.length}`);
+      } else {
+        console.log(`[${this.scanid}] Checkpoint commit not found, starting from beginning`);
+      }
+    } else {
+      console.log(`[${this.scanid}] Starting from oldest commit`);
+    }
+    
+    // Process commits from oldest to newest
+    for (let i = startindex; i < allcommits.length; i++) {
+      const commitsha = allcommits[i];
+      
+      await this.processcommit(commitsha);
+      totalprocessed++;
+
+      await savecheckpoint(this.scanid, {
+        lastcommitsha: commitsha,
+        timestamp: new Date().toISOString(),
+        totalcommits: totalprocessed
+      });
+
+      await setprogress(this.scanid, `Processed ${totalprocessed} commits (${i + 1}/${allcommits.length})`);
+    }
+    
+    console.log(`[${this.scanid}] Finished processing all commits`);
   }
 
   private async processcommit(commitsha: string): Promise<void> {
@@ -181,8 +243,11 @@ export class GitHubScanner {
         for (const secret of secrets) {
           console.log(`[${this.scanid}] 🔍 Found ${secret.type} in ${filename} (commit: ${commitsha.substring(0, 7)})`);
           
+          const commiturl = `https://github.com/${this.owner}/${this.repo}/commit/${commitsha}`;
+          
           const finding: Finding = {
             commit: commitsha,
+            commitUrl: commiturl,
             committer: committer,
             timestamp: timestamp,
             file: filename,

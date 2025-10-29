@@ -109,6 +109,42 @@ export async function getresultsfile(scanid: string): Promise<string | null> {
   return await client.get(key);
 }
 
+export async function setrepository(scanid: string, repository: string): Promise<void> {
+  const client = await getredisclient();
+  const key = `scan:${scanid}:repository`;
+  await client.set(key, repository);
+}
+
+export async function getrepository(scanid: string): Promise<string | null> {
+  const client = await getredisclient();
+  const key = `scan:${scanid}:repository`;
+  return await client.get(key);
+}
+
+export async function getallscanids(): Promise<string[]> {
+  const client = await getredisclient();
+  const scanids = new Set<string>();
+  
+  let cursor = 0;
+  do {
+    const result = await client.scan(cursor, {
+      MATCH: 'scan:*',
+      COUNT: 100
+    });
+    
+    cursor = result.cursor;
+    
+    for (const key of result.keys) {
+      const match = key.match(/^scan:([^:]+):/);
+      if (match) {
+        scanids.add(match[1]);
+      }
+    }
+  } while (cursor !== 0);
+  
+  return Array.from(scanids);
+}
+
 export async function deletescan(scanid: string): Promise<void> {
   const client = await getredisclient();
   const keys = [
@@ -118,7 +154,8 @@ export async function deletescan(scanid: string): Promise<void> {
     `scan:${scanid}:progress`,
     `scan:${scanid}:starttime`,
     `scan:${scanid}:endtime`,
-    `scan:${scanid}:resultsfile`
+    `scan:${scanid}:resultsfile`,
+    `scan:${scanid}:repository`
   ];
   
   for (const key of keys) {

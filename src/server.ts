@@ -1,8 +1,10 @@
 import express, { Request, Response } from 'express';
 import * as dotenv from 'dotenv';
+import { promises as fs } from 'fs';
+import { join } from 'path';
 import { GitHubScanner } from './services/scanner';
-import { initredis, getfindings, getstatus, getprogress, deletescan, closeredis, getstarttime, getendtime, getresultsfile } from './services/redis';
-import { ScanRequest, ScanStatus, ScanResults } from './types';
+import { initredis, getfindings, getstatus, getprogress, deletescan, closeredis, getstarttime, getendtime, getresultsfile, setrepository, getrepository, getallscanids } from './services/redis';
+import { ScanRequest, ScanStatus, ScanResults, Finding } from './types';
 
 dotenv.config();
 
@@ -23,13 +25,71 @@ async function ensureredis() {
   if (!isredisinitialized) {
     await initredis(redisurl);
     isredisinitialized = true;
+    await recoverscansonrestart();
+  }
+}
+
+async function recoverscansonrestart() {
+  try {
+    console.log('Checking for in-progress scans to recover...');
+    const allscanids = await getallscanids();
+    
+    if (allscanids.length === 0) {
+      console.log('No scans found in Redis.');
+      return;
+    }
+    
+    console.log(`Found ${allscanids.length} scan(s) in Redis, checking status...`);
+    
+    // Get all scan statuses in parallel
+    const scanstatuses = await Promise.all(
+      allscanids.map(async (scanid) => ({
+        scanid,
+        status: await getstatus(scanid),
+        repository: await getrepository(scanid)
+      }))
+    );
+    
+    // Filter for in-progress scans
+    const inprogressscans = scanstatuses.filter(
+      (scan) => scan.status === 'in-progress' && scan.repository
+    );
+    
+    if (inprogressscans.length === 0) {
+      console.log('No in-progress scans to recover.');
+      return;
+    }
+    
+    console.log(`Resuming ${inprogressscans.length} in-progress scan(s)...`);
+    
+    // Resume all scans in parallel
+    inprogressscans.forEach((scan) => {
+      console.log(`  - Resuming scan: ${scan.scanid} for repository: ${scan.repository}`);
+      const scanner = new GitHubScanner(githubtoken, scan.repository!, scan.scanid);
+      scanner.scan().catch(() => {});
+    });
+    
+    console.log('Scan recovery process completed.');
+  } catch (error) {
+    console.error('Error recovering scans:', error);
+  }
+}
+
+async function loadresultsfromfile(scanid: string): Promise<any | null> {
+  try {
+    const resultsdirectory = join(process.cwd(), 'results');
+    const filename = `scan_${scanid}_results.json`;
+    const filepath = join(resultsdirectory, filename);
+    
+    const filecontent = await fs.readFile(filepath, 'utf-8');
+    return JSON.parse(filecontent);
+  } catch (error) {
+    return null;
   }
 }
 
 app.post('/api/scan', async (req: Request, res: Response) => {
   try {
-    await ensureredis();
-    
     const scanrequest: ScanRequest = req.body;
     
     if (!scanrequest.repository) {
@@ -57,6 +117,8 @@ app.post('/api/scan', async (req: Request, res: Response) => {
       resultsurl: `/api/scan/${scanid}/results`
     });
     
+    await setrepository(scanid, scanrequest.repository);
+    
     const scanner = new GitHubScanner(githubtoken, scanrequest.repository, scanid);
     scanner.scan().catch(() => {});
     
@@ -70,12 +132,25 @@ app.post('/api/scan', async (req: Request, res: Response) => {
 
 app.get('/api/scan/:scanid/status', async (req: Request, res: Response) => {
   try {
-    await ensureredis();
-    
     const scanid = req.params.scanid;
     
     const status = await getstatus(scanid);
+    
+    // If not in Redis, try loading from file
     if (!status) {
+      const filedata = await loadresultsfromfile(scanid);
+      if (filedata) {
+        const response: ScanStatus = {
+          status: 'completed',
+          progress: 'Scan completed',
+          findings: filedata.findings || [],
+          starttime: filedata.starttime,
+          elapsedtime: filedata.duration
+        };
+        res.json(response);
+        return;
+      }
+      
       res.status(404).json({ error: 'Scan not found' });
       return;
     }
@@ -103,12 +178,32 @@ app.get('/api/scan/:scanid/status', async (req: Request, res: Response) => {
 
 app.get('/api/scan/:scanid/results', async (req: Request, res: Response) => {
   try {
-    await ensureredis();
-    
     const scanid = req.params.scanid;
     
     const status = await getstatus(scanid);
+    
+    // If not in Redis, try loading from file
     if (!status) {
+      const filedata = await loadresultsfromfile(scanid);
+      if (filedata) {
+        const resultsdirectory = join(process.cwd(), 'results');
+        const filename = `scan_${scanid}_results.json`;
+        const filepath = join(resultsdirectory, filename);
+        
+        const response: ScanResults = {
+          scanid: filedata.scanid || scanid,
+          status: 'completed',
+          totalfindings: filedata.totalfindings || 0,
+          findings: filedata.findings || [],
+          starttime: filedata.starttime,
+          endtime: filedata.endtime,
+          duration: filedata.duration,
+          resultsfile: filepath
+        };
+        res.json(response);
+        return;
+      }
+      
       res.status(404).json({ error: 'Scan not found' });
       return;
     }
@@ -140,8 +235,6 @@ app.get('/api/scan/:scanid/results', async (req: Request, res: Response) => {
 
 app.delete('/api/scan/:scanid', async (req: Request, res: Response) => {
   try {
-    await ensureredis();
-    
     const scanid = req.params.scanid;
     
     await deletescan(scanid);
@@ -185,8 +278,10 @@ function calculateelapsedtime(starttime: string): string {
   return formatduration(starttime, new Date().toISOString());
 }
 
-const server = app.listen(port, () => {
-  
+const server = app.listen(port, async () => {
+  console.log(`Server started on port ${port}`);
+  await ensureredis();
+  console.log('Server ready to accept requests');
 });
 
 process.on('SIGTERM', async () => {
