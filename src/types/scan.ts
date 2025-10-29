@@ -2,25 +2,25 @@ import { Finding } from './finding';
 
 export interface ScanRequest {
   repository: string;
-  scanid?: string;
+  scanId?: string;
 }
 
 export interface ScanStatus {
   status: 'in-progress' | 'completed' | 'failed';
   progress: string;
   findings: Finding[];
-  starttime?: string;
-  elapsedtime?: string;
+  startTime?: string;
+  elapsedTime?: string;
 }
 
 export interface ScanResults {
-  scanid: string;
+  scanId: string;
   status: string;
-  totalfindings: number;
+  totalFindings: number;
   findings: Finding[];
-  starttime?: string;
-  endtime?: string;
+  startTime?: string;
+  endTime?: string;
   duration?: string;
-  resultsfile?: string;
+  resultsFile?: string;
 }
 

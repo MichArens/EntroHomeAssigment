@@ -3,7 +3,7 @@ import * as dotenv from 'dotenv';
 import { promises as fs } from 'fs';
 import { join } from 'path';
 import { GitHubScanner } from './services/scanner';
-import { initredis, getfindings, getstatus, getprogress, deletescan, closeredis, getstarttime, getendtime, getresultsfile, setrepository, getrepository, getallscanids } from './services/redis';
+import { initRedis, getFindings, getStatus, getProgress, deleteScan, closeRedis, getStartTime, getEndTime, getResultsFile, setRepository, getRepository, getAllScanIds } from './services/redis';
 import { ScanRequest, ScanStatus, ScanResults, Finding } from './types';
 
 dotenv.config();
@@ -11,61 +11,61 @@ dotenv.config();
 const app = express();
 app.use(express.json());
 
-const githubtoken = process.env.githubtoken || process.env.GITHUB_TOKEN || '';
-const redisurl = process.env.redisurl || process.env.REDIS_URL || 'redis://localhost:6379';
+const githubToken = process.env.githubtoken || process.env.GITHUB_TOKEN || '';
+const redisUrl = process.env.redisurl || process.env.REDIS_URL || 'redis://localhost:6379';
 const port = parseInt(process.env.port || process.env.PORT || '3000');
 
-if (!githubtoken) {
+if (!githubToken) {
   throw new Error('GitHub token not provided. Set githubtoken environment variable.');
 }
 
-let isredisinitialized = false;
+let isRedisInitialized = false;
 
-async function ensureredis() {
-  if (!isredisinitialized) {
-    await initredis(redisurl);
-    isredisinitialized = true;
-    await recoverscansonrestart();
+async function ensureRedis() {
+  if (!isRedisInitialized) {
+    await initRedis(redisUrl);
+    isRedisInitialized = true;
+    await recoverScansOnRestart();
   }
 }
 
-async function recoverscansonrestart() {
+async function recoverScansOnRestart() {
   try {
     console.log('Checking for in-progress scans to recover...');
-    const allscanids = await getallscanids();
+    const allScanIds = await getAllScanIds();
     
-    if (allscanids.length === 0) {
+    if (allScanIds.length === 0) {
       console.log('No scans found in Redis.');
       return;
     }
     
-    console.log(`Found ${allscanids.length} scan(s) in Redis, checking status...`);
+    console.log(`Found ${allScanIds.length} scan(s) in Redis, checking status...`);
     
     // Get all scan statuses in parallel
-    const scanstatuses = await Promise.all(
-      allscanids.map(async (scanid) => ({
-        scanid,
-        status: await getstatus(scanid),
-        repository: await getrepository(scanid)
+    const scanStatuses = await Promise.all(
+      allScanIds.map(async (scanId) => ({
+        scanId,
+        status: await getStatus(scanId),
+        repository: await getRepository(scanId)
       }))
     );
     
     // Filter for in-progress scans
-    const inprogressscans = scanstatuses.filter(
+    const inProgressScans = scanStatuses.filter(
       (scan) => scan.status === 'in-progress' && scan.repository
     );
     
-    if (inprogressscans.length === 0) {
+    if (inProgressScans.length === 0) {
       console.log('No in-progress scans to recover.');
       return;
     }
     
-    console.log(`Resuming ${inprogressscans.length} in-progress scan(s)...`);
+    console.log(`Resuming ${inProgressScans.length} in-progress scan(s)...`);
     
     // Resume all scans in parallel
-    inprogressscans.forEach((scan) => {
-      console.log(`  - Resuming scan: ${scan.scanid} for repository: ${scan.repository}`);
-      const scanner = new GitHubScanner(githubtoken, scan.repository!, scan.scanid);
+    inProgressScans.forEach((scan) => {
+      console.log(`  - Resuming scan: ${scan.scanId} for repository: ${scan.repository}`);
+      const scanner = new GitHubScanner(githubToken, scan.repository!, scan.scanId);
       scanner.scan().catch(() => {});
     });
     
@@ -75,14 +75,14 @@ async function recoverscansonrestart() {
   }
 }
 
-async function loadresultsfromfile(scanid: string): Promise<any | null> {
+async function loadResultsFromFile(scanId: string): Promise<any | null> {
   try {
-    const resultsdirectory = join(process.cwd(), 'results');
-    const filename = `scan_${scanid}_results.json`;
-    const filepath = join(resultsdirectory, filename);
+    const resultsDirectory = join(process.cwd(), 'results');
+    const filename = `scan_${scanId}_results.json`;
+    const filePath = join(resultsDirectory, filename);
     
-    const filecontent = await fs.readFile(filepath, 'utf-8');
-    return JSON.parse(filecontent);
+    const fileContent = await fs.readFile(filePath, 'utf-8');
+    return JSON.parse(fileContent);
   } catch (error) {
     return null;
   }
@@ -90,36 +90,36 @@ async function loadresultsfromfile(scanid: string): Promise<any | null> {
 
 app.post('/api/scan', async (req: Request, res: Response) => {
   try {
-    const scanrequest: ScanRequest = req.body;
+    const scanRequest: ScanRequest = req.body;
     
-    if (!scanrequest.repository) {
+    if (!scanRequest.repository) {
       res.status(400).json({ error: 'Repository is required' });
       return;
     }
     
-    if (!scanrequest.repository.includes('/')) {
+    if (!scanRequest.repository.includes('/')) {
       res.status(400).json({ error: 'Repository must be in format owner/repo' });
       return;
     }
     
-    const scanid = scanrequest.scanid || generateid();
+    const scanId = scanRequest.scanId || generateId();
     
-    const existingstatus = await getstatus(scanid);
-    if (existingstatus === 'in-progress') {
-      res.status(400).json({ error: 'Scan already in progress', scanid });
+    const existingStatus = await getStatus(scanId);
+    if (existingStatus === 'in-progress') {
+      res.status(400).json({ error: 'Scan already in progress', scanId });
       return;
     }
     
     res.status(202).json({ 
       message: 'Scan started',
-      scanid: scanid,
-      statusurl: `/api/scan/${scanid}/status`,
-      resultsurl: `/api/scan/${scanid}/results`
+      scanId: scanId,
+      statusUrl: `/api/scan/${scanId}/status`,
+      resultsUrl: `/api/scan/${scanId}/results`
     });
     
-    await setrepository(scanid, scanrequest.repository);
+    await setRepository(scanId, scanRequest.repository);
     
-    const scanner = new GitHubScanner(githubtoken, scanrequest.repository, scanid);
+    const scanner = new GitHubScanner(githubToken, scanRequest.repository, scanId);
     scanner.scan().catch(() => {});
     
   } catch (error) {
@@ -132,20 +132,20 @@ app.post('/api/scan', async (req: Request, res: Response) => {
 
 app.get('/api/scan/:scanid/status', async (req: Request, res: Response) => {
   try {
-    const scanid = req.params.scanid;
+    const scanId = req.params.scanid;
     
-    const status = await getstatus(scanid);
+    const status = await getStatus(scanId);
     
     // If not in Redis, try loading from file
     if (!status) {
-      const filedata = await loadresultsfromfile(scanid);
-      if (filedata) {
+      const fileData = await loadResultsFromFile(scanId);
+      if (fileData) {
         const response: ScanStatus = {
           status: 'completed',
           progress: 'Scan completed',
-          findings: filedata.findings || [],
-          starttime: filedata.starttime,
-          elapsedtime: filedata.duration
+          findings: fileData.findings || [],
+          startTime: fileData.startTime,
+          elapsedTime: fileData.duration
         };
         res.json(response);
         return;
@@ -155,16 +155,16 @@ app.get('/api/scan/:scanid/status', async (req: Request, res: Response) => {
       return;
     }
     
-    const progress = await getprogress(scanid) || 'Starting scan...';
-    const findings = await getfindings(scanid);
-    const starttime = await getstarttime(scanid);
+    const progress = await getProgress(scanId) || 'Starting scan...';
+    const findings = await getFindings(scanId);
+    const startTime = await getStartTime(scanId);
     
     const response: ScanStatus = {
       status: status as 'in-progress' | 'completed' | 'failed',
       progress: progress,
       findings: findings,
-      starttime: starttime || undefined,
-      elapsedtime: starttime ? calculateelapsedtime(starttime) : undefined
+      startTime: startTime || undefined,
+      elapsedTime: startTime ? calculateElapsedTime(startTime) : undefined
     };
     
     res.json(response);
@@ -178,27 +178,27 @@ app.get('/api/scan/:scanid/status', async (req: Request, res: Response) => {
 
 app.get('/api/scan/:scanid/results', async (req: Request, res: Response) => {
   try {
-    const scanid = req.params.scanid;
+    const scanId = req.params.scanid;
     
-    const status = await getstatus(scanid);
+    const status = await getStatus(scanId);
     
     // If not in Redis, try loading from file
     if (!status) {
-      const filedata = await loadresultsfromfile(scanid);
-      if (filedata) {
-        const resultsdirectory = join(process.cwd(), 'results');
-        const filename = `scan_${scanid}_results.json`;
-        const filepath = join(resultsdirectory, filename);
+      const fileData = await loadResultsFromFile(scanId);
+      if (fileData) {
+        const resultsDirectory = join(process.cwd(), 'results');
+        const filename = `scan_${scanId}_results.json`;
+        const filePath = join(resultsDirectory, filename);
         
         const response: ScanResults = {
-          scanid: filedata.scanid || scanid,
+          scanId: fileData.scanId || scanId,
           status: 'completed',
-          totalfindings: filedata.totalfindings || 0,
-          findings: filedata.findings || [],
-          starttime: filedata.starttime,
-          endtime: filedata.endtime,
-          duration: filedata.duration,
-          resultsfile: filepath
+          totalFindings: fileData.totalFindings || 0,
+          findings: fileData.findings || [],
+          startTime: fileData.startTime,
+          endTime: fileData.endTime,
+          duration: fileData.duration,
+          resultsFile: filePath
         };
         res.json(response);
         return;
@@ -208,20 +208,20 @@ app.get('/api/scan/:scanid/results', async (req: Request, res: Response) => {
       return;
     }
     
-    const findings = await getfindings(scanid);
-    const starttime = await getstarttime(scanid);
-    const endtime = await getendtime(scanid);
-    const resultsfile = await getresultsfile(scanid);
+    const findings = await getFindings(scanId);
+    const startTime = await getStartTime(scanId);
+    const endTime = await getEndTime(scanId);
+    const resultsFile = await getResultsFile(scanId);
     
     const response: ScanResults = {
-      scanid: scanid,
+      scanId: scanId,
       status: status,
-      totalfindings: findings.length,
+      totalFindings: findings.length,
       findings: findings,
-      starttime: starttime || undefined,
-      endtime: endtime || undefined,
-      duration: starttime && endtime ? formatduration(starttime, endtime) : undefined,
-      resultsfile: resultsfile || undefined
+      startTime: startTime || undefined,
+      endTime: endTime || undefined,
+      duration: startTime && endTime ? formatDuration(startTime, endTime) : undefined,
+      resultsFile: resultsFile || undefined
     };
     
     res.json(response);
@@ -235,11 +235,11 @@ app.get('/api/scan/:scanid/results', async (req: Request, res: Response) => {
 
 app.delete('/api/scan/:scanid', async (req: Request, res: Response) => {
   try {
-    const scanid = req.params.scanid;
+    const scanId = req.params.scanid;
     
-    await deletescan(scanid);
+    await deleteScan(scanId);
     
-    res.json({ message: 'Scan data deleted', scanid: scanid });
+    res.json({ message: 'Scan data deleted', scanId: scanId });
   } catch (error) {
     res.status(500).json({ 
       error: 'Internal server error',
@@ -251,18 +251,18 @@ app.delete('/api/scan/:scanid', async (req: Request, res: Response) => {
 app.get('/api/results', async (req: Request, res: Response) => {
   try {
     // Get scan IDs from Redis
-    const redisscanids = await getallscanids();
+    const redisScanIds = await getAllScanIds();
     
     // Get scan IDs from results directory
-    const resultsdirectory = join(process.cwd(), 'results');
-    let filescanids: string[] = [];
+    const resultsDirectory = join(process.cwd(), 'results');
+    let fileScanIds: string[] = [];
     
     try {
-      const files = await fs.readdir(resultsdirectory);
-      filescanids = files
+      const files = await fs.readdir(resultsDirectory);
+      fileScanIds = files
         .filter(file => file.startsWith('scan_') && file.endsWith('_results.json'))
         .map(file => {
-          // Extract scan ID from filename: scan_{scanid}_results.json
+          // Extract scan ID from filename: scan_{scanId}_results.json
           const match = file.match(/^scan_(.+)_results\.json$/);
           return match ? match[1] : null;
         })
@@ -272,9 +272,9 @@ app.get('/api/results', async (req: Request, res: Response) => {
     }
     
     // Combine and deduplicate
-    const allscanids = [...new Set([...redisscanids, ...filescanids])];
+    const allScanIds = [...new Set([...redisScanIds, ...fileScanIds])];
     
-    res.json({ scanids: allscanids });
+    res.json({ scanIds: allScanIds });
   } catch (error) {
     res.status(500).json({ 
       error: 'Internal server error',
@@ -287,16 +287,16 @@ app.get('/health', (req: Request, res: Response) => {
   res.json({ status: 'ok' });
 });
 
-function generateid(): string {
+function generateId(): string {
   return `scan_${Date.now()}_${Math.random().toString(36).substring(2, 9)}`;
 }
 
-function formatduration(starttime: string, endtime: string): string {
-  const start = new Date(starttime).getTime();
-  const end = new Date(endtime).getTime();
-  const diffms = end - start;
+function formatDuration(startTime: string, endTime: string): string {
+  const start = new Date(startTime).getTime();
+  const end = new Date(endTime).getTime();
+  const diffMs = end - start;
   
-  const seconds = Math.floor(diffms / 1000);
+  const seconds = Math.floor(diffMs / 1000);
   const minutes = Math.floor(seconds / 60);
   const hours = Math.floor(minutes / 60);
   
@@ -309,25 +309,25 @@ function formatduration(starttime: string, endtime: string): string {
   }
 }
 
-function calculateelapsedtime(starttime: string): string {
-  return formatduration(starttime, new Date().toISOString());
+function calculateElapsedTime(startTime: string): string {
+  return formatDuration(startTime, new Date().toISOString());
 }
 
 const server = app.listen(port, async () => {
   console.log(`Server started on port ${port}`);
-  await ensureredis();
+  await ensureRedis();
   console.log('Server ready to accept requests');
 });
 
 process.on('SIGTERM', async () => {
-  await closeredis();
+  await closeRedis();
   server.close(() => {
     process.exit(0);
   });
 });
 
 process.on('SIGINT', async () => {
-  await closeredis();
+  await closeRedis();
   server.close(() => {
     process.exit(0);
   });

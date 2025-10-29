@@ -1,6 +1,6 @@
 export interface Checkpoint {
-  lastcommitsha: string;
+  lastCommitSha: string;
   timestamp: string;
-  totalcommits: number;
+  totalCommits: number;
 }
 

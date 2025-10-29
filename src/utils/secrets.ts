@@ -3,7 +3,7 @@ export interface SecretPattern {
   pattern: RegExp;
 }
 
-const secretpatterns: SecretPattern[] = [
+const secretPatterns: SecretPattern[] = [
   // AWS Patterns Only
   {
     name: 'AWS_ACCESS_KEY_ID',
@@ -36,19 +36,19 @@ export interface SecretMatch {
   value: string;
 }
 
-export function detectsecrets(content: string): SecretMatch[] {
+export function detectSecrets(content: string): SecretMatch[] {
   const matches: SecretMatch[] = [];
   
-  for (const secretpattern of secretpatterns) {
-    const regex = new RegExp(secretpattern.pattern);
+  for (const secretPattern of secretPatterns) {
+    const regex = new RegExp(secretPattern.pattern);
     let match;
     
     while ((match = regex.exec(content)) !== null) {
       const value = match[1] || match[0];
       
-      if (shouldincludematch(secretpattern.name, value)) {
+      if (shouldIncludeMatch(secretPattern.name, value)) {
         matches.push({
-          type: secretpattern.name,
+          type: secretPattern.name,
           value: value.trim()
         });
       }
@@ -58,7 +58,7 @@ export function detectsecrets(content: string): SecretMatch[] {
   return matches;
 }
 
-function shouldincludematch(type: string, value: string): boolean {
+function shouldIncludeMatch(type: string, value: string): boolean {
   // Common false positive filters for all AWS secrets
   const valueLower = value.toLowerCase();
   
@@ -87,8 +87,8 @@ function shouldincludematch(type: string, value: string): boolean {
     }
     
     // Filter out file paths with common directory/file names
-    const commonpathwords = ['src', 'dist', 'main', 'master', 'blob', 'tree', 'commit', 'docs', 'readme', 'contributing', 'license', 'config', 'package'];
-    for (const word of commonpathwords) {
+    const commonPathWords = ['src', 'dist', 'main', 'master', 'blob', 'tree', 'commit', 'docs', 'readme', 'contributing', 'license', 'config', 'package'];
+    for (const word of commonPathWords) {
       if (valueLower.includes(word)) {
         return false;
       }

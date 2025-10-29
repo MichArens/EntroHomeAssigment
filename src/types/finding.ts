@@ -5,7 +5,7 @@ export interface Finding {
   timestamp: string;
   file: string;
   line: number;
-  leakvalue: string;
-  leaktype: string;
+  leakValue: string;
+  leakType: string;
 }
 

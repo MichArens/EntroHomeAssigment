@@ -1,129 +1,129 @@
 import { createClient } from 'redis';
 import { Finding, Checkpoint } from '../types';
 
-let redisclient: ReturnType<typeof createClient> | null = null;
+let redisClient: ReturnType<typeof createClient> | null = null;
 
-export async function initredis(redisurl: string) {
-  redisclient = createClient({ url: redisurl });
+export async function initRedis(redisUrl: string) {
+  redisClient = createClient({ url: redisUrl });
   
-  redisclient.on('error', (err) => {
+  redisClient.on('error', (err) => {
     throw new Error(`Redis connection error: ${err.message}`);
   });
   
-  await redisclient.connect();
+  await redisClient.connect();
 }
 
-export async function getredisclient() {
-  if (!redisclient) {
+export async function getRedisClient() {
+  if (!redisClient) {
     throw new Error('Redis client not initialized');
   }
-  return redisclient;
+  return redisClient;
 }
 
-export async function savecheckpoint(scanid: string, checkpoint: Checkpoint): Promise<void> {
-  const client = await getredisclient();
-  const key = `scan:${scanid}:checkpoint`;
+export async function saveCheckpoint(scanId: string, checkpoint: Checkpoint): Promise<void> {
+  const client = await getRedisClient();
+  const key = `scan:${scanId}:checkpoint`;
   await client.set(key, JSON.stringify(checkpoint));
 }
 
-export async function getcheckpoint(scanid: string): Promise<Checkpoint | null> {
-  const client = await getredisclient();
-  const key = `scan:${scanid}:checkpoint`;
+export async function getCheckpoint(scanId: string): Promise<Checkpoint | null> {
+  const client = await getRedisClient();
+  const key = `scan:${scanId}:checkpoint`;
   const data = await client.get(key);
   
   if (!data) return null;
   return JSON.parse(data);
 }
 
-export async function savefinding(scanid: string, finding: Finding): Promise<void> {
-  const client = await getredisclient();
-  const key = `scan:${scanid}:findings`;
+export async function saveFinding(scanId: string, finding: Finding): Promise<void> {
+  const client = await getRedisClient();
+  const key = `scan:${scanId}:findings`;
   await client.rPush(key, JSON.stringify(finding));
 }
 
-export async function getfindings(scanid: string): Promise<Finding[]> {
-  const client = await getredisclient();
-  const key = `scan:${scanid}:findings`;
+export async function getFindings(scanId: string): Promise<Finding[]> {
+  const client = await getRedisClient();
+  const key = `scan:${scanId}:findings`;
   const data = await client.lRange(key, 0, -1);
   
   return data.map(item => JSON.parse(item));
 }
 
-export async function setstatus(scanid: string, status: string): Promise<void> {
-  const client = await getredisclient();
-  const key = `scan:${scanid}:status`;
+export async function setStatus(scanId: string, status: string): Promise<void> {
+  const client = await getRedisClient();
+  const key = `scan:${scanId}:status`;
   await client.set(key, status);
 }
 
-export async function getstatus(scanid: string): Promise<string | null> {
-  const client = await getredisclient();
-  const key = `scan:${scanid}:status`;
+export async function getStatus(scanId: string): Promise<string | null> {
+  const client = await getRedisClient();
+  const key = `scan:${scanId}:status`;
   return await client.get(key);
 }
 
-export async function setprogress(scanid: string, progress: string): Promise<void> {
-  const client = await getredisclient();
-  const key = `scan:${scanid}:progress`;
+export async function setProgress(scanId: string, progress: string): Promise<void> {
+  const client = await getRedisClient();
+  const key = `scan:${scanId}:progress`;
   await client.set(key, progress);
 }
 
-export async function getprogress(scanid: string): Promise<string | null> {
-  const client = await getredisclient();
-  const key = `scan:${scanid}:progress`;
+export async function getProgress(scanId: string): Promise<string | null> {
+  const client = await getRedisClient();
+  const key = `scan:${scanId}:progress`;
   return await client.get(key);
 }
 
-export async function setstarttime(scanid: string, starttime: string): Promise<void> {
-  const client = await getredisclient();
-  const key = `scan:${scanid}:starttime`;
-  await client.set(key, starttime);
+export async function setStartTime(scanId: string, startTime: string): Promise<void> {
+  const client = await getRedisClient();
+  const key = `scan:${scanId}:starttime`;
+  await client.set(key, startTime);
 }
 
-export async function getstarttime(scanid: string): Promise<string | null> {
-  const client = await getredisclient();
-  const key = `scan:${scanid}:starttime`;
+export async function getStartTime(scanId: string): Promise<string | null> {
+  const client = await getRedisClient();
+  const key = `scan:${scanId}:starttime`;
   return await client.get(key);
 }
 
-export async function setendtime(scanid: string, endtime: string): Promise<void> {
-  const client = await getredisclient();
-  const key = `scan:${scanid}:endtime`;
-  await client.set(key, endtime);
+export async function setEndTime(scanId: string, endTime: string): Promise<void> {
+  const client = await getRedisClient();
+  const key = `scan:${scanId}:endtime`;
+  await client.set(key, endTime);
 }
 
-export async function getendtime(scanid: string): Promise<string | null> {
-  const client = await getredisclient();
-  const key = `scan:${scanid}:endtime`;
+export async function getEndTime(scanId: string): Promise<string | null> {
+  const client = await getRedisClient();
+  const key = `scan:${scanId}:endtime`;
   return await client.get(key);
 }
 
-export async function setresultsfile(scanid: string, filepath: string): Promise<void> {
-  const client = await getredisclient();
-  const key = `scan:${scanid}:resultsfile`;
-  await client.set(key, filepath);
+export async function setResultsFile(scanId: string, filePath: string): Promise<void> {
+  const client = await getRedisClient();
+  const key = `scan:${scanId}:resultsfile`;
+  await client.set(key, filePath);
 }
 
-export async function getresultsfile(scanid: string): Promise<string | null> {
-  const client = await getredisclient();
-  const key = `scan:${scanid}:resultsfile`;
+export async function getResultsFile(scanId: string): Promise<string | null> {
+  const client = await getRedisClient();
+  const key = `scan:${scanId}:resultsfile`;
   return await client.get(key);
 }
 
-export async function setrepository(scanid: string, repository: string): Promise<void> {
-  const client = await getredisclient();
-  const key = `scan:${scanid}:repository`;
+export async function setRepository(scanId: string, repository: string): Promise<void> {
+  const client = await getRedisClient();
+  const key = `scan:${scanId}:repository`;
   await client.set(key, repository);
 }
 
-export async function getrepository(scanid: string): Promise<string | null> {
-  const client = await getredisclient();
-  const key = `scan:${scanid}:repository`;
+export async function getRepository(scanId: string): Promise<string | null> {
+  const client = await getRedisClient();
+  const key = `scan:${scanId}:repository`;
   return await client.get(key);
 }
 
-export async function getallscanids(): Promise<string[]> {
-  const client = await getredisclient();
-  const scanids = new Set<string>();
+export async function getAllScanIds(): Promise<string[]> {
+  const client = await getRedisClient();
+  const scanIds = new Set<string>();
   
   let cursor = 0;
   do {
@@ -137,25 +137,25 @@ export async function getallscanids(): Promise<string[]> {
     for (const key of result.keys) {
       const match = key.match(/^scan:([^:]+):/);
       if (match) {
-        scanids.add(match[1]);
+        scanIds.add(match[1]);
       }
     }
   } while (cursor !== 0);
   
-  return Array.from(scanids);
+  return Array.from(scanIds);
 }
 
-export async function deletescan(scanid: string): Promise<void> {
-  const client = await getredisclient();
+export async function deleteScan(scanId: string): Promise<void> {
+  const client = await getRedisClient();
   const keys = [
-    `scan:${scanid}:checkpoint`,
-    `scan:${scanid}:findings`,
-    `scan:${scanid}:status`,
-    `scan:${scanid}:progress`,
-    `scan:${scanid}:starttime`,
-    `scan:${scanid}:endtime`,
-    `scan:${scanid}:resultsfile`,
-    `scan:${scanid}:repository`
+    `scan:${scanId}:checkpoint`,
+    `scan:${scanId}:findings`,
+    `scan:${scanId}:status`,
+    `scan:${scanId}:progress`,
+    `scan:${scanId}:starttime`,
+    `scan:${scanId}:endtime`,
+    `scan:${scanId}:resultsfile`,
+    `scan:${scanId}:repository`
   ];
   
   for (const key of keys) {
@@ -163,9 +163,9 @@ export async function deletescan(scanid: string): Promise<void> {
   }
 }
 
-export async function closeredis(): Promise<void> {
-  if (redisclient) {
-    await redisclient.quit();
+export async function closeRedis(): Promise<void> {
+  if (redisClient) {
+    await redisClient.quit();
   }
 }
 
