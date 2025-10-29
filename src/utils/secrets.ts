@@ -6,7 +6,7 @@ export interface SecretPattern {
 const secretPatterns: SecretPattern[] = [
   {
     name: 'AWS_ACCESS_KEY_ID',
-    pattern: /(A3T[A-Z0-9]|AKIA|AGPA|AIDA|AROA|AIPA|ANPA|ANVA|ASIA)[A-Z0-9]{16}/g
+    pattern: /(?:A3T[A-Z0-9]|AKIA|AGPA|AIDA|AROA|AIPA|ANPA|ANVA|ASIA)[A-Z0-9]{16}/g
   },
   {
     name: 'AWS_SECRET_ACCESS_KEY',
@@ -18,11 +18,11 @@ const secretPatterns: SecretPattern[] = [
   },
   {
     name: 'AWS_SESSION_TOKEN',
-    pattern: /(?:aws_session_token|aws_token|session_token)[\s]*[=:][\s]*['"]?([A-Za-z0-9/+=]{100,})['"]?/gi
+    pattern: /(?:aws_session_token|aws_token|session_?token)[\s]*[=:][\s]*['"]?([A-Za-z0-9/+=]{100,})['"]?/gi
   },
   {
     name: 'AWS_ACCOUNT_ID',
-    pattern: /(?:aws_account_id|aws_account)[\s]*[=:][\s]*['"]?(\d{12})['"]?/gi
+    pattern: /(?:aws_account_id|aws_account|account_?id)[\s]*[=:][\s]*['"]?(\d{12})['"]?/gi
   },
   {
     name: 'AWS_MWS_KEY',
@@ -72,9 +72,10 @@ function shouldIncludeMatch(type: string, value: string): boolean {
 function isCommonFalsePositive(value: string): boolean {
   const valueLower = value.toLowerCase();
   
+  // Only filter obvious placeholders, not values that might be in test repos
   const commonFalsePositives = [
-    'example', 'sample', 'fake', 'test', 'demo', 'placeholder',
-    'your_', 'your-', 'my_', 'my-', 'dummy', 'xxxxxxxx'
+    'your_secret', 'your_key', 'my_secret', 'my_key', 
+    'placeholder', 'dummy', 'xxxxxxxx', 'replace_me'
   ];
   
   return commonFalsePositives.some(falsePositive => valueLower.includes(falsePositive));
@@ -100,12 +101,10 @@ function containsUrlOrPathPatterns(value: string): boolean {
     return true;
   }
   
-  const commonPathWords = [
-    'src', 'dist', 'main', 'master', 'blob', 'tree', 'commit', 
-    'docs', 'readme', 'contributing', 'license', 'config', 'package'
-  ];
+  // Only filter if it looks like a URL path (contains forward slashes with these words)
+  const urlPathPattern = /(src|dist|main|master|blob|tree|commit|docs|readme|contributing|license|package)\//;
   
-  return commonPathWords.some(word => valueLower.includes(word));
+  return urlPathPattern.test(valueLower);
 }
 
 function hasLowEntropy(str: string): boolean {
@@ -122,5 +121,6 @@ function hasLowEntropy(str: string): boolean {
     entropy -= p * Math.log2(p);
   }
   
-  return entropy < 3.5;
+  // Lowered threshold to be less aggressive - AWS secrets can have patterns
+  return entropy < 3.0;
 }
